@@ -1,0 +1,17 @@
+VagZlumAuto — Vercel
+
+1. Завантаж цей проєкт у GitHub так, щоб app.py, config.py, requirements.txt,
+   templates/ і static/ були в КОРЕНІ репозиторію.
+2. У Vercel натисни Add New -> Project і вибери цей GitHub-репозиторій.
+3. Framework Preset залишай Auto. Build Command і Output Directory не потрібні.
+4. Deploy.
+
+Важливо:
+- Це Flask/Python сайт. GitHub Pages не запускає Python — сайт потрібно відкривати
+  через Vercel або інший Python-хостинг.
+- Vercel працює з app.py автоматично.
+- На Vercel SQLite і завантажені фото в цій версії працюють у /tmp, тому нові
+  записи/фото НЕ є постійним сховищем. Для постійного каталогу авто потрібна
+  зовнішня база даних та сховище файлів.
+- Для входу адміністратора можна задати в Vercel Environment Variables:
+  ADMIN_EMAIL, ADMIN_PASSWORD, SECRET_KEY.

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site.name }} — {{ site.title }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="{{ url_for('home') }}"><b>🚘</b><span>{{ site.name }}<small>Авто, запчастини, ремонт</small></span></a>
+  <nav>
+    {% for item in nav %}
+      {% if not item.roles or (current_user and current_user.role in item.roles) %}
+      <a class="{{ 'active' if request.endpoint == item.endpoint else '' }}" href="{{ url_for(item.endpoint) }}">{{ item.name }}</a>
+      {% endif %}
+    {% endfor %}
+  </nav>
+  <div class="nav-actions">
+    <a class="call js-call-modal" href="#">{{ ui.nav_call }}</a>
+    {% if current_user %}<a class="login" href="{{ url_for('logout') }}">{{ ui.nav_logout }}</a>
+    {% else %}<a class="login" href="{{ url_for('login') }}">{{ ui.nav_login }}</a>{% endif %}
+  </div>
+</header>
+<main>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}<div class="flash-wrap">{% for cat,msg in messages %}<div class="flash {{cat}}">{{msg}}</div>{% endfor %}</div>{% endif %}
+{% endwith %}
+{% block content %}{% endblock %}
+</main>
+<footer><b>{{ site.name }}</b><br>{{ site.footer }}</footer>
+<div id="callModal" class="call-modal" aria-hidden="true">
+  <div class="call-modal-backdrop" data-close-call></div>
+  <div class="call-modal-card" role="dialog" aria-modal="true" aria-labelledby="callModalTitle">
+    <button class="call-modal-close" type="button" aria-label="{{ ui.close }}" data-close-call>×</button>
+    <div class="call-modal-icon">☎</div>
+    <h2 id="callModalTitle">{{ ui.call_title }}</h2>
+    <p>{{ ui.call_subtitle }}</p>
+    <div class="call-numbers">
+      {% for phone in phones %}
+      <div class="call-number">
+        <div class="call-number-main">{{ phone.display }}</div>
+        <div class="call-number-actions">
+          <a href="viber://chat?number=%2B{{ phone.digits }}" class="social-btn">{{ ui.viber }}</a>
+          <a href="tg://resolve?phone={{ phone.digits }}" class="social-btn">{{ ui.telegram }}</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+<script>
+(function(){const modal=document.getElementById('callModal');if(!modal)return;const open=()=>{modal.classList.add('open');modal.setAttribute('aria-hidden','false');document.body.classList.add('modal-open')};const close=()=>{modal.classList.remove('open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('modal-open')};document.querySelectorAll('.js-call-modal').forEach(btn=>btn.addEventListener('click',e=>{e.preventDefault();open()}));modal.querySelectorAll('[data-close-call]').forEach(el=>el.addEventListener('click',close));document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('open'))close()})})();
+</script>
+</body></html>
