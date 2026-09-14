@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import sqlite3
@@ -7,26 +7,111 @@ import uuid
 import os
 
 BASE = Path(__file__).resolve().parent
-
-# Vercel має файлову систему лише для читання, тому SQLite та завантажені
-# фото під час роботи serverless-функції зберігаємо у /tmp.
-ON_VERCEL = bool(os.environ.get("VERCEL"))
-if ON_VERCEL:
-    DB_PATH = Path("/tmp/vagzlumauto.db")
-    if not DB_PATH.exists() and (BASE / "vagzlumauto.db").exists():
-        import shutil
-        shutil.copy2(BASE / "vagzlumauto.db", DB_PATH)
-    UPLOAD_DIR = Path("/tmp/vagzlumauto_uploads")
-else:
-    DB_PATH = BASE / "vagzlumauto.db"
-    UPLOAD_DIR = BASE / "static" / "uploads"
-
+DB_PATH = BASE / "vagzlumauto.db"
+UPLOAD_DIR = BASE / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024
-from config import *
+MAX_PHOTOS = 100
+
+DETAIL_FIELDS = [
+    "generation", "trim", "modification", "eco_standard", "condition", "fuel_consumption",
+    "safety", "air_conditioner", "comfort", "optics", "multimedia", "interior_body",
+    "headlights", "parking", "airbags"
+]
+
+ALLOWED = {"jpg", "jpeg", "png", "webp"}
+CAR_BRANDS = ["Volkswagen", "Renault", "Ford", "Dacia", "Nissan"]
+CAR_MODELS = {
+    "Volkswagen": [
+        "Golf", "Golf 1.0 TSI", "Golf 1.2 TSI", "Golf 1.4 TSI", "Golf 1.5 TSI", "Golf 1.5 eTSI",
+        "Golf 1.6", "Golf 1.6 TDI", "Golf 2.0", "Golf 2.0 TDI", "Golf 2.0 TSI", "Golf 2.0 GTI", "Golf R", "Golf GTE",
+        "Jetta", "Jetta 1.4 TSI", "Jetta 1.6", "Jetta 1.8 TSI", "Jetta 2.0", "Jetta 2.0 TDI", "Jetta GLI",
+        "Passat", "Passat 1.4 TSI", "Passat 1.5 TSI", "Passat 1.8 TSI", "Passat 2.0 TSI", "Passat 2.0 TDI", "Passat 2.0 BiTDI", "Passat GTE",
+        "Touran", "Touran 1.2 TSI", "Touran 1.4 TSI", "Touran 1.6 TDI", "Touran 2.0 TDI"
+    ],
+    "Renault": [
+        "Clio", "Megane", "Laguna", "Scenic", "Espace", "Talisman", "Captur", "Kadjar", "Koleos",
+        "Austral", "Arkana", "Kangoo", "Trafic", "Master", "Zoe", "Duster"
+    ],
+    "Ford": [
+        "Fiesta", "Focus", "Mondeo", "Fusion", "Taurus", "Mustang", "Puma", "Kuga", "Edge", "Explorer", "Escape",
+        "Bronco", "Bronco Sport", "Expedition", "EcoSport", "Maverick", "Ranger", "F-150", "F-250", "F-350",
+        "Transit", "Transit Custom", "Transit Connect", "Transit Courier", "Tourneo Connect", "Tourneo Custom",
+        "Galaxy", "S-Max", "C-Max", "Grand C-Max", "B-Max", "Ka", "Ka+", "Crown Victoria", "GT", "GT40",
+        "Probe", "Capri", "Escort", "Sierra", "Scorpio", "Granada", "Orion", "Puma ST", "Focus ST", "Focus RS",
+        "Fiesta ST", "Mustang Mach-E"
+    ],
+    "Dacia": [
+        "Logan", "Sandero", "Sandero Stepway", "Duster", "Jogger", "Spring", "Lodgy", "Dokker", "Dokker Van",
+        "Logan MCV", "Logan Pick-Up", "Solenza", "1310", "Bigster"
+    ],
+    "Nissan": [
+        "Almera", "Juke", "Micra", "Navara", "Note", "Qashqai", "X-Trail", "Leaf", "Murano", "Pathfinder", "Primera", "Tiida"
+    ],
+}
+# Сумісність зі старими записами бази, де моделі були записані як окремі марки.
+LEGACY_MODEL_BRANDS = {"GOLF": "Golf", "JETTA": "Jetta", "PASSAT": "Passat", "TOURAN": "Touran", "RENAULT": None, "FORD": None, "DACIA": None}
+
+FUEL = ["Бензин", "Дизель", "Гібрид", "Електро"]
+GEARBOX = ["Механіка", "Автомат", "DSG", "Варіатор"]
+BODY = ["Хетчбек", "Седан", "Універсал", "Купе", "Кабріолет", "Ліфтбек", "Фастбек", "Тарга", "Родстер", "Кросовер", "Позашляховик", "Мінівен", "Мікроавтобус", "Фургон", "Пікап", "Універсал/фургон"]
+DRIVE = ["Передній", "Задній", "Повний"]
+ROLES = {"user": "Користувач", "editor": "Редактор", "admin": "Адміністратор"}
+
+ADDITIONAL_SERVICES = [
+    {
+        "slug": "shinomontazh",
+        "name": "Шиномонтаж",
+        "icon": "◉",
+        "description": "Монтаж та демонтаж шин, балансування коліс, перевірка тиску та підготовка автомобіля до сезону.",
+    },
+    {
+        "slug": "himchistka",
+        "name": "Хімчистка",
+        "icon": "✦",
+        "description": "Професійна хімчистка салону автомобіля: сидіння, стеля, підлога, пластик та важкодоступні місця.",
+    },
+    {
+        "slug": "myika-avto",
+        "name": "Мийка авто",
+        "icon": "✧",
+        "description": "Комплексна мийка автомобіля з очищенням кузова, скла та коліс. Доступні різні варіанти миття.",
+    },
+    {
+        "slug": "detailing",
+        "name": "Детейлінг",
+        "icon": "◆",
+        "description": "Детейлінг кузова та салону: глибоке очищення, відновлення зовнішнього вигляду та захист поверхонь.",
+    },
+    {
+        "slug": "computer-diagnostics",
+        "name": "Компʼютерна діагностика",
+        "icon": "⚡",
+        "description": "Компʼютерна перевірка електронних блоків автомобіля, зчитування помилок та діагностика несправностей.",
+    },
+    {
+        "slug": "prygon-avto",
+        "name": "Пригон авто",
+        "icon": "➜",
+        "description": "Допоможемо підібрати та пригнати автомобіль під ваш бюджет і побажання, перевіримо варіанти перед купівлею.",
+    },
+]
+
+SERVICES = [
+    ("Заміна масла та фільтрів", "Регулярне ТО та заміна витратних матеріалів.", "від 800 грн"),
+    ("Діагностика двигуна", "Комп'ютерна та механічна діагностика.", "від 500 грн"),
+    ("Ремонт гальмівної системи", "Колодки, диски, супорти та гальмівна рідина.", "від 1 500 грн"),
+    ("Ремонт підвіски", "Діагностика та заміна елементів ходової.", "від 2 000 грн"),
+    ("Ремонт та заміна двигуна", "Ремонтні роботи та заміна агрегатів.", "від 15 000 грн"),
+    ("Ремонт коробки передач", "Механічні та автоматичні КПП.", "від 8 000 грн"),
+    ("Електрика та діагностика", "Пошук і усунення електричних несправностей.", "від 600 грн"),
+    ("Ремонт кондиціонера", "Заправка, діагностика та ремонт системи.", "від 600 грн"),
+    ("Ремонт вихлопної системи", "Глушник, каталізатор та інші елементи.", "від 2 500 грн"),
+    ("Комп'ютерна діагностика", "Повна перевірка електронних блоків автомобіля.", "від 400 грн"),
+]
 
 def db():
     conn = sqlite3.connect(DB_PATH)
@@ -72,11 +157,10 @@ def init_db():
     # Додаємо детальні характеристики до вже існуючих баз без втрати даних.
     existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(cars)").fetchall()}
     for field in DETAIL_FIELDS:
-        field_key = field["key"]
-        if field_key not in existing_cols:
-            conn.execute(f"ALTER TABLE cars ADD COLUMN {field_key} TEXT")
-    admin_email = os.environ.get("ADMIN_EMAIL", ADMIN_DEFAULT_EMAIL)
-    admin_password = os.environ.get("ADMIN_PASSWORD", ADMIN_DEFAULT_PASSWORD)
+        if field not in existing_cols:
+            conn.execute(f"ALTER TABLE cars ADD COLUMN {field} TEXT")
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@vagzlumauto.local")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")
     existing = conn.execute("SELECT id FROM users WHERE email=?", (admin_email,)).fetchone()
     if not existing:
         conn.execute(
@@ -108,11 +192,6 @@ def save_upload(file):
     file.save(UPLOAD_DIR / filename)
     return filename
 
-@app.route("/uploads/<path:filename>")
-def uploaded_file(filename):
-    # Фото з /tmp не є частиною Vercel static files, тому віддаємо їх через Flask.
-    return send_from_directory(UPLOAD_DIR, filename)
-
 def require_role(*roles):
     user = current_user()
     if not user or user["role"] not in roles:
@@ -121,7 +200,7 @@ def require_role(*roles):
 
 @app.context_processor
 def inject_globals():
-    return {"current_user": current_user(), "roles": ROLES, "site": SITE, "phones": PHONES, "ui": TEXT, "nav": NAV, "detail_field_map": DETAIL_FIELD_MAP, "quick_picker": QUICK_PICKER, "main_fields": MAIN_FIELDS, "detail_fields": DETAIL_FIELDS, "max_photos": MAX_PHOTOS}
+    return {"current_user": current_user(), "roles": ROLES}
 
 @app.route("/")
 def home():
@@ -186,7 +265,7 @@ def car_detail(car_id):
     conn.close()
     if not car:
         abort(404)
-    return render_template("car_detail.html", car=car, photos=photos, detail_groups=DETAIL_GROUPS)
+    return render_template("car_detail.html", car=car, photos=photos)
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -259,7 +338,7 @@ def add_car():
     defaults = {"brand":"", "model":"", "year":"", "price":"", "mileage":"", "power":"",
                 "fuel":"", "gearbox":"", "body":"", "color":"", "engine":"", "drive":"",
                 "phone":"", "description":"", "vin":""}
-    defaults.update({field["key"]: "" for field in DETAIL_FIELDS})
+    defaults.update({field: "" for field in DETAIL_FIELDS})
 
     if request.method == "POST":
         fields = {key: request.form.get(key, "").strip() for key in defaults}
@@ -277,7 +356,7 @@ def add_car():
              (fields["brand"], fields["model"], fields["year"] or None, fields["price"] or None, fields["mileage"] or None,
               fields["power"] or None, fields["fuel"], fields["gearbox"], fields["body"], fields["color"], fields["engine"],
               fields["drive"], fields["phone"], fields["description"], fields["vin"], user["id"],
-              *(fields[f["key"]] for f in DETAIL_FIELDS)))
+              *(fields[f] for f in DETAIL_FIELDS)))
         car_id = cur.lastrowid
         photo_files = [f for f in request.files.getlist("photos") if f and f.filename]
         if len(photo_files) > MAX_PHOTOS:
@@ -322,7 +401,7 @@ def edit_car(car_id):
 
     fields = {key: (car[key] if key in car.keys() else "") for key in [
         "brand", "model", "year", "price", "mileage", "power", "fuel", "gearbox", "body", "color", "engine", "drive",
-        "phone", "description", "vin", *[f["key"] for f in DETAIL_FIELDS]
+        "phone", "description", "vin", *DETAIL_FIELDS
     ]}
 
     if request.method == "POST":
@@ -338,7 +417,7 @@ def edit_car(car_id):
             """, (
                 fields["brand"], fields["model"], fields["year"] or None, fields["price"] or None, fields["mileage"] or None,
                 fields["power"] or None, fields["fuel"], fields["gearbox"], fields["body"], fields["color"], fields["engine"],
-                fields["drive"], fields["phone"], fields["description"], fields["vin"], *(fields[f["key"]] for f in DETAIL_FIELDS), car_id
+                fields["drive"], fields["phone"], fields["description"], fields["vin"], *(fields[f] for f in DETAIL_FIELDS), car_id
             ))
             photo_files = [f for f in request.files.getlist("photos") if f and f.filename]
             current_count = conn.execute("SELECT COUNT(*) FROM car_photos WHERE car_id=?", (car_id,)).fetchone()[0]
